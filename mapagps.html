@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Mapa Dinámico - Oficinas</title>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB0zqoDPtMGCtKRqas6bBL8WHU2V9DbUzI"></script>
+    <style>
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background-color: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        #controls input {
+            width: 100%;
+            margin-bottom: 10px;
+            padding: 8px;
+        }
+
+        #controls button {
+            width: 100%;
+            padding: 8px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        #controls button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <input type="number" id="radiusInput" placeholder="Ingresa el radio en km" />
+        <button onclick="updateMap()">Aplicar Radio</button>
+    </div>
+    <div id="map"></div>
+    <script>
+        let map; // Variable global para el mapa
+        let userLocation = null; // Variable global para la ubicación del usuario
+        let rows = []; // Variable global para almacenar las ubicaciones
+        let userMarker = null; // Variable global para el marcador de la ubicación del usuario
+
+        async function initMap() {
+            const csvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSfPOWh3xKKGBYNQ-aDaN2t3sfne2izlRPlhvze6TebcHHINoOzKLniyxyTrKSyCdOl1EWrJZR6Ez4_/pub?output=csv";
+
+            try {
+                const response = await fetch(csvUrl);
+                const data = await response.text();
+
+                // Parsear CSV
+                function parseCSVRow(row) {
+                    const regex = /(?:,|\n|^)(?:"([^"]*(?:""[^"]*)*)"|([^",\n]*))/g;
+                    const fields = [];
+                    let match;
+                    while ((match = regex.exec(row)) !== null) {
+                        fields.push(match[1] ? match[1].replace(/""/g, '"') : match[2]);
+                    }
+                    return fields.map(field => field.trim());
+                }
+
+                rows = data.split("\n").slice(1).map(row => {
+                    const [nombre, direccion, descripcion, lat, lng, url] = parseCSVRow(row);
+                    const parsedLat = parseFloat(lat);
+                    const parsedLng = parseFloat(lng);
+                    if (isNaN(parsedLat) || isNaN(parsedLng)) return null;
+                    return { nombre, direccion, descripcion, lat: parsedLat, lng: parsedLng, url };
+                }).filter(row => row !== null);
+
+                if (rows.length === 0) {
+                    console.error("No se encontraron datos válidos.");
+                    return;
+                }
+
+                // Crear mapa inicial
+                map = new google.maps.Map(document.getElementById("map"), {
+                    zoom: 14,
+                    center: { lat: rows[0].lat, lng: rows[0].lng }
+                });
+
+                // Mostrar la ubicación del usuario
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition((position) => {
+                        userLocation = {
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude,
+                        };
+
+                        // Agregar marcador de la ubicación del usuario
+                        userMarker = new google.maps.Marker({
+                            position: userLocation,
+                            map: map,
+                            icon: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+                            title: "Tu ubicación",
+                        });
+
+                        // Centrar el mapa en la ubicación del usuario
+                        map.setCenter(userLocation);
+                    }, () => {
+                        alert("No se pudo acceder a tu ubicación.");
+                    });
+                } else {
+                    alert("Tu navegador no soporta geolocalización.");
+                }
+            } catch (error) {
+                console.error("Error al cargar los datos del Google Sheet:", error);
+            }
+        }
+
+        // Función para calcular la distancia entre dos puntos (fórmula de Haversine)
+        function calculateDistance(lat1, lng1, lat2, lng2) {
+            const R = 6371; // Radio de la Tierra en km
+            const dLat = (lat2 - lat1) * (Math.PI / 180);
+            const dLng = (lng2 - lng1) * (Math.PI / 180);
+            const a =
+                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * (Math.PI / 180)) *
+                Math.cos(lat2 * (Math.PI / 180)) *
+                Math.sin(dLng / 2) *
+                Math.sin(dLng / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c; // Distancia en km
+        }
+
+        // Función para actualizar el mapa según el radio ingresado
+        function updateMap() {
+            const radiusInput = document.getElementById("radiusInput").value;
+            const radiusKm = parseFloat(radiusInput);
+
+            if (isNaN(radiusKm) || radiusKm <= 0) {
+                alert("Por favor, ingresa un radio válido en kilómetros.");
+                return;
+            }
+
+            if (!userLocation) {
+                alert("No se pudo determinar tu ubicación.");
+                return;
+            }
+
+            // Limpiar el mapa
+            map = new google.maps.Map(document.getElementById("map"), {
+                zoom: 14,
+                center: userLocation,
+            });
+
+            // Volver a agregar el marcador de la ubicación del usuario
+            userMarker = new google.maps.Marker({
+                position: userLocation,
+                map: map,
+                icon: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+                title: "Tu ubicación",
+            });
+
+            // Agregar marcadores dentro del radio
+            rows.forEach(location => {
+                const distance = calculateDistance(
+                    userLocation.lat, userLocation.lng, location.lat, location.lng
+                );
+
+                if (distance <= radiusKm) {
+                    const marker = new google.maps.Marker({
+                        position: { lat: location.lat, lng: location.lng },
+                        map: map,
+                        title: location.nombre,
+                    });
+
+                    const infoWindow = new google.maps.InfoWindow({
+                        content: `
+                            <div>
+                                <h3>${location.nombre || "Sin nombre"}</h3>
+                                <p>Dirección: ${location.direccion || "Sin dirección"}</p>
+                                <p>Descripción: ${location.descripcion || "Sin descripción"}</p>
+                                <p>Distancia: ${distance.toFixed(2)} km</p>
+                                <a href="${location.url || "#"}" target="_blank">Ver en Google Maps</a>
+                            </div>
+                        `,
+                    });
+
+                    marker.addListener("click", () => {
+                        infoWindow.open(map, marker);
+                    });
+                }
+            });
+        }
+
+        // Inicializar el mapa
+        initMap();
+    </script>
+</body>
+</html>
