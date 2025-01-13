@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Mapa Dinámico - Oficinas</title>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB0zqoDPtMGCtKRqas6bBL8WHU2V9DbUzI"></script>
+    <style>
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        async function initMap() {
+            // URL del Google Sheet publicado como CSV
+            const csvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSfPOWh3xKKGBYNQ-aDaN2t3sfne2izlRPlhvze6TebcHHINoOzKLniyxyTrKSyCdOl1EWrJZR6Ez4_/pub?output=csv";
+
+            try {
+                // Obtener los datos del Google Sheet
+                const response = await fetch(csvUrl);
+                const data = await response.text();
+
+                // Mostrar los datos en la consola para depuración
+                console.log("Datos CSV descargados:", data);
+
+                // Función para procesar una línea CSV respetando comillas dobles
+                function parseCSVRow(row) {
+                    const regex = /(?:,|\n|^)(?:"([^"]*(?:""[^"]*)*)"|([^",\n]*))/g; // Regex para procesar comillas dobles
+                    const fields = [];
+                    let match;
+                    while ((match = regex.exec(row)) !== null) {
+                        fields.push(match[1] ? match[1].replace(/""/g, '"') : match[2]);
+                    }
+                    return fields.map(field => field.trim());
+                }
+
+                // Convertir CSV a un array de objetos con validación y limpieza de datos
+                const rows = data.split("\n").slice(1).map(row => {
+                    const [nombre, direccion, descripcion, lat, lng, url] = parseCSVRow(row);
+
+                    // Validar los datos extraídos
+                    console.log("Procesando fila:", {
+                        nombre,
+                        direccion,
+                        descripcion,
+                        lat,
+                        lng,
+                        url
+                    });
+
+                    // Limpiar espacios en blanco y caracteres no deseados
+                    const parsedLat = parseFloat(lat);
+                    const parsedLng = parseFloat(lng);
+
+                    // Validar las coordenadas
+                    if (isNaN(parsedLat) || isNaN(parsedLng)) {
+                        console.warn("Fila ignorada debido a coordenadas inválidas:", {
+                            row,
+                            parsedLat,
+                            parsedLng
+                        });
+                        return null;
+                    }
+
+                    // Retornar un objeto con los datos procesados
+                    return {
+                        nombre: nombre?.trim(),
+                        direccion: direccion?.trim(),
+                        descripcion: descripcion?.trim(),
+                        lat: parsedLat,
+                        lng: parsedLng,
+                        url: url?.trim()
+                    };
+                }).filter(row => row !== null); // Filtrar filas inválidas
+
+                // Mostrar los datos procesados en la consola
+                console.log("Datos procesados:", rows);
+
+                // Verificar si hay datos válidos
+                if (rows.length === 0) {
+                    console.error("No se encontraron datos válidos.");
+                    return;
+                }
+
+                // Crear el mapa centrado en la primera ubicación válida
+                const map = new google.maps.Map(document.getElementById("map"), {
+                    zoom: 14,
+                    center: { lat: rows[0].lat, lng: rows[0].lng }
+                });
+
+                // Agregar marcadores al mapa
+                rows.forEach(location => {
+                    console.log("Agregando marcador para:", location);
+                    const marker = new google.maps.Marker({
+                        position: { lat: location.lat, lng: location.lng },
+                        map: map,
+                        title: location.nombre
+                    });
+
+                    // Crear una ventana de información para el marcador
+                    const infoWindow = new google.maps.InfoWindow({
+                        content: `
+                            <div>
+                                <h3 style="margin: 0;">${location.nombre || "Sin nombre"}</h3>
+                                <p style="margin: 0;">Dirección: ${location.direccion || "Sin dirección"}</p>
+                                <p style="margin: 0;">Descripción: ${location.descripcion || "Sin descripción"}</p>
+                                <p style="margin: 0;">
+                                    <a href="${location.url || "#"}" target="_blank" style="color: blue; text-decoration: underline;">Ver en Google Maps</a>
+                                </p>
+                            </div>
+                        `
+                    });
+
+                    // Mostrar ventana de información al hacer clic en el marcador
+                    marker.addListener("click", () => {
+                        infoWindow.open(map, marker);
+                    });
+                });
+            } catch (error) {
+                console.error("Error al cargar los datos del Google Sheet:", error);
+            }
+        }
+
+        // Inicializar el mapa
+        initMap();
+    </script>
+</body>
+</html>
